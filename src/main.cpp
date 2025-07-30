@@ -18,11 +18,11 @@ void task1(void *parameters)
     Serial.println("Task 1: Running on core ");
     // Serial.printlnln(xPortGetCoreID());
     digitalWrite(led_pin, HIGH);
-    Serial.println("Task 1: Set LED HIGH on core ");
-    vTaskDelay(500 / portTICK_PERIOD_MS);
-    digitalWrite(led_pin, LOW);
-    Serial.println("Task 1: Set LED low on core ");
-    vTaskDelay(500 / portTICK_PERIOD_MS);
+    Serial.println("Task 1: Set LED HIGH ");
+    vTaskDelay(700 / portTICK_PERIOD_MS);
+    // digitalWrite(led_pin, LOW);
+    // Serial.println("Task 1: Set LED low on core ");
+    // vTaskDelay(700 / portTICK_PERIOD_MS);
   }
 }
 
@@ -32,12 +32,12 @@ void task2(void *parameters)
   {
     Serial.println("Task 2: Running on core ");
     // Serial.printlnln(xPortGetCoreID());
-    digitalWrite(led_pin, HIGH);
-    Serial.println("Task 2: Set LED HIGH on core ");
-    vTaskDelay(300 / portTICK_PERIOD_MS);
     digitalWrite(led_pin, LOW);
-    Serial.println("Task 2: Set LED low on core ");
-    vTaskDelay(300 / portTICK_PERIOD_MS);
+    Serial.println("Task 2: Set LED LOW on core ");
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    // digitalWrite(led_pin, LOW);
+    // Serial.println("Task 2: Set LED low on core ");
+    // vTaskDelay(500 / portTICK_PERIOD_MS);
   }
 }
 
