@@ -1,16 +1,21 @@
 #include <Arduino.h>
 
-int count1 = 0;
-int count2 = 0;
-#define LED_BUILTIN 2
+// Only use core 1 (ESP32)
+#if CONFIG_FREERTOS_UNICORE
+static const BaseType_t app_cpu = 0;
+#else
+static const BaseType_t app_cpu = 1;
+#endif
+
+static const int led_pin = 2; // Use built-in LED
 
 void task1(void *parameters)
 {
     for (;;)
-    {                                    // infinite loop
-        digitalWrite(LED_BUILTIN, HIGH); // turn the LED on (HIGH is the voltage level)
-        Serial.print("Task 1 counter: ");
-        Serial.println(count1++);
+    {
+        digitalWrite(led_pin, HIGH);
+        Serial.print("Task 1: Set LED HIGH, running on core ");
+        Serial.println(xPortGetCoreID());
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
@@ -18,11 +23,11 @@ void task1(void *parameters)
 void task2(void *parameters)
 {
     for (;;)
-    { // infinite loop
-        Serial.print("Task 2 counter: ");
-        Serial.println(count2++);
+    {
+        Serial.print("Task 2: Set LED LOW, running on core ");
+        Serial.println(xPortGetCoreID());
         vTaskDelay(500 / portTICK_PERIOD_MS);
-        digitalWrite(LED_BUILTIN, LOW);
+        digitalWrite(led_pin, LOW);
         vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 }
@@ -30,24 +35,12 @@ void task2(void *parameters)
 void setup()
 {
     Serial.begin(115200);
-    pinMode(LED_BUILTIN, OUTPUT);
-    xTaskCreate(
-        task1,    // Function that should be called
-        "Task 1", // Name of the task (for debugging)
-        1000,     // Stack size (bytes)
-        NULL,     // Parameter to pass
-        1,        // Task priority
-        NULL      // Task handle
-    );
+    pinMode(led_pin, OUTPUT);
 
-    xTaskCreate(
-        task2,    // Function that should be called
-        "Task 2", // Name of the task (for debugging)
-        1000,     // Stack size (bytes)
-        NULL,     // Parameter to pass
-        1,        // Task priority
-        NULL      // Task handle
-    );
+    xTaskCreatePinnedToCore(
+        task1, "Task 1", 1000, NULL, 1, NULL, app_cpu);
+    xTaskCreatePinnedToCore(
+        task2, "Task 2", 1000, NULL, 1, NULL, app_cpu);
 }
 
 void loop() {}
