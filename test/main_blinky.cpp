@@ -1,34 +1,46 @@
 #include <Arduino.h>
 
-void setup() {
-  // No need to initialize the RGB LED
-  Serial.begin(115200);
-}
-
-// the loop function runs over and over again forever
-
-void loop() {
-#ifdef RGB_BUILTIN
-  neopixelWrite(RGB_BUILTIN,RGB_BRIGHTNESS,RGB_BRIGHTNESS,RGB_BRIGHTNESS); // White
-  Serial.println("White");
-  delay(1000);
-  neopixelWrite(RGB_BUILTIN,0,RGB_BRIGHTNESS,RGB_BRIGHTNESS); // Cyan
-  Serial.println("Cyan");
-  delay(1000);
-  neopixelWrite(RGB_BUILTIN,RGB_BRIGHTNESS,RGB_BRIGHTNESS,0); // Yellow
-  Serial.println("Yellow");
-  delay(1000);
-  neopixelWrite(RGB_BUILTIN,RGB_BRIGHTNESS,0,0); // Red
-  Serial.println("Red");
-  delay(1000);
-  neopixelWrite(RGB_BUILTIN,0,RGB_BRIGHTNESS,0); // Green
-  Serial.println("Green");
-  delay(1000);
-  neopixelWrite(RGB_BUILTIN,0,0,RGB_BRIGHTNESS); // Blue
-  Serial.println("Blue");
-  delay(1000);
-  neopixelWrite(RGB_BUILTIN,0,0,0); // Off / black
-  Serial.println("Off");
-  delay(1000);
+// Only use core 1 (ESP32)
+#if CONFIG_FREERTOS_UNICORE
+static const BaseType_t app_cpu = 0;
+#else
+static const BaseType_t app_cpu = 1;
 #endif
+
+static const int led_pin = 2; // Use built-in LED
+
+void task1(void *parameters)
+{
+  for (;;)
+  {
+    digitalWrite(led_pin, HIGH);
+    Serial.print("Task 1: Set LED HIGH, running on core ");
+    Serial.println(xPortGetCoreID());
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
 }
+
+void task2(void *parameters)
+{
+  for (;;)
+  {
+    Serial.print("Task 2: Set LED LOW, running on core ");
+    Serial.println(xPortGetCoreID());
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    digitalWrite(led_pin, LOW);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+  }
+}
+
+void setup()
+{
+  Serial.begin(115200);
+  pinMode(led_pin, OUTPUT);
+
+  xTaskCreatePinnedToCore(
+      task1, "Task 1", 1000, NULL, 1, NULL, app_cpu);
+  xTaskCreatePinnedToCore(
+      task2, "Task 2", 1000, NULL, 1, NULL, app_cpu);
+}
+
+void loop() {}
