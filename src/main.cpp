@@ -1,22 +1,8 @@
 #include <Arduino.h>
-#if defined(ESP32)
-#include "esp32-hal-gpio.h"
-#define LED_BUILTIN 2 // ESP32 DevKit built-in LED pin
-#endif
+#include <StringUtils.h>
+#include "BoardConfig.h"
 
 volatile int ledDelay = 500; // Initial delay in milliseconds
-
-bool isValidPositiveInteger(const String &str)
-{
-    if (str.length() == 0)
-        return false;
-    for (size_t i = 0; i < str.length(); ++i)
-    {
-        if (!isDigit(str[i]))
-            return false;
-    }
-    return true;
-}
 
 void ledToggleTask(void *pvParameters)
 {
@@ -60,7 +46,7 @@ void serialInputTask(void *pvParameters)
                         if (newDelay > 0)
                         {
                             ledDelay = newDelay;
-                            Serial.print("LED delay updated to: ");
+                            Serial.print("\nLED delay updated to: ");
                             Serial.println(ledDelay);
                         }
                         else
