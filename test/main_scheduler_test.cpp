@@ -1,22 +1,12 @@
 #include <Arduino.h>
-#if defined(ESP32)
-#include "esp32-hal-gpio.h"
-#define LED_BUILTIN 2 // ESP32 DevKit built-in LED pin
-#endif
+#include <StringUtils.h>
+#include "BoardConfig.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 volatile int ledDelay = 500; // Initial delay in milliseconds
-
-bool isValidPositiveInteger(const String &str)
-{
-    if (str.length() == 0)
-        return false;
-    for (size_t i = 0; i < str.length(); ++i)
-    {
-        if (!isDigit(str[i]))
-            return false;
-    }
-    return true;
-}
+// Handle to the LED toggle task so we can delete/recreate it at runtime
+TaskHandle_t ledTaskHandle = NULL;
 
 void ledToggleTask(void *pvParameters)
 {
@@ -28,6 +18,27 @@ void ledToggleTask(void *pvParameters)
         digitalWrite(LED_BUILTIN, ledState ? HIGH : LOW);
         vTaskDelay(pdMS_TO_TICKS(ledDelay));
     }
+}
+
+// Delete the existing LED task (if any) and create a new one that will use
+// the current value of `ledDelay`.
+void restartLedTask()
+{
+    if (ledTaskHandle != NULL)
+    {
+        vTaskDelete(ledTaskHandle);
+        ledTaskHandle = NULL;
+        // brief delay to let the scheduler finish deleting the task
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    xTaskCreate(
+        ledToggleTask,
+        "LED Toggle Task",
+        1024,
+        NULL,
+        1,
+        &ledTaskHandle);
 }
 
 void serialInputTask(void *pvParameters)
@@ -60,8 +71,9 @@ void serialInputTask(void *pvParameters)
                         if (newDelay > 0)
                         {
                             ledDelay = newDelay;
-                            Serial.print("LED delay updated to: ");
-                            Serial.println(ledDelay);
+                            // recreate the LED task so it uses the (possibly) new delay value
+                            restartLedTask();
+                            Serial.printf("\nLED delay updated to: %d ms.\n", ledDelay);
                         }
                         else
                         {
@@ -103,7 +115,7 @@ void setup()
         1024,
         NULL,
         1,
-        NULL);
+        &ledTaskHandle);
     xTaskCreate(
         serialInputTask,
         "Serial Input Task",
