@@ -1,129 +1,49 @@
 #include <Arduino.h>
-#include <StringUtils.h>
-#include "BoardConfig.h"
 
-volatile int ledDelay = 500; // Initial delay in milliseconds
-// Handle to the LED toggle task so we can delete/recreate it at runtime
-TaskHandle_t ledTaskHandle = NULL;
+#if CONFIG_FREERTOS_UNICORE
+static const BaseType_t app_cpu = 0;
+#else
+static const BaseType_t app_cpu = 1;
+#endif
 
-void ledToggleTask(void *pvParameters)
+void testTask(void *parameter)
 {
-    pinMode(LED_BUILTIN, OUTPUT);
-    bool ledState = false;
     while (1)
     {
-        ledState = !ledState;
-        digitalWrite(LED_BUILTIN, ledState ? HIGH : LOW);
-        vTaskDelay(pdMS_TO_TICKS(ledDelay));
-    }
-}
+        int a = 1;
+        int b[100];
 
-// Delete the existing LED task (if any) and create a new one that will use
-// the current value of `ledDelay`.
-void restartLedTask()
-{
-    if (ledTaskHandle != NULL)
-    {
-        vTaskDelete(ledTaskHandle);
-        ledTaskHandle = NULL;
-        // brief delay to let the scheduler finish deleting the task
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-
-    xTaskCreate(
-        ledToggleTask,
-        "LED Toggle Task",
-        1024,
-        NULL,
-        1,
-        &ledTaskHandle);
-}
-
-void serialInputTask(void *pvParameters)
-{
-    String inputString = "";
-    char lastChar = 0;
-    Serial.println("Enter LED delay in ms (positive integer):");
-    while (1)
-    {
-        if (Serial.available())
+        // Do something with array so it's not optimized out by the compiler
+        for (int i = 0; i < 100; i++)
         {
-            char c = Serial.read();
-            if (c != '\n' && c != '\r')
-            {
-                Serial.write(c);
-            } // Echo back the received character
-
-            // Only process on line ending, and ignore double-processing (CR+LF)
-            if ((c == '\n' || c == '\r') && (lastChar != '\r' && c == '\n'))
-            {
-                // Do nothing, already handled by previous '\r'
-            }
-            else if (c == '\n' || c == '\r')
-            {
-                if (inputString.length() > 0)
-                {
-                    if (isValidPositiveInteger(inputString))
-                    {
-                        int newDelay = inputString.toInt();
-                        if (newDelay > 0)
-                        {
-                            ledDelay = newDelay;
-                            // recreate the LED task so it uses the (possibly) new delay value
-                            restartLedTask();
-                            Serial.printf("\nLED delay updated to: %d ms.\n", ledDelay);
-                        }
-                        else
-                        {
-                            Serial.println("Please enter a number greater than zero.");
-                        }
-                    }
-                    else
-                    {
-                        Serial.println("Invalid input. Only positive numbers allowed.");
-                    }
-                    inputString = "";
-                    Serial.println("Enter LED delay in ms (positive integer):");
-                }
-            }
-            else
-            {
-                if (isDigit(c))
-                {
-                    inputString += c;
-                }
-            }
-            lastChar = c;
+            b[i] = a + 1;
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        Serial.println(b[0]);
+
+        // Print out remaining stack memory (words)
+        Serial.print("High water mark (words): ");
+        Serial.println(uxTaskGetStackHighWaterMark(NULL));
     }
 }
 
 void setup()
 {
+    // Configrue Serial
     Serial.begin(115200);
-    while (!Serial)
-    {
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    pinMode(LED_BUILTIN, OUTPUT);
-    xTaskCreate(
-        ledToggleTask,
-        "LED Toggle Task",
-        1024,
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    Serial.println("Starting memory demo test task...");
+    xTaskCreatePinnedToCore(
+        testTask,
+        "Test Task",
+        1500,
         NULL,
         1,
-        &ledTaskHandle);
-    xTaskCreate(
-        serialInputTask,
-        "Serial Input Task",
-        2048,
         NULL,
-        1,
-        NULL);
+        app_cpu);
+    vTaskDelete(NULL);
 }
 
 void loop()
 {
-    // Nothing to do here, tasks handle everything!
+    // Empty loop
 }
