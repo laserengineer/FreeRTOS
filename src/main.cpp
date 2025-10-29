@@ -1,8 +1,6 @@
 #include <Arduino.h>
 #include <StringUtils.h>
 #include "BoardConfig.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 volatile int ledDelay = 500; // Initial delay in milliseconds
 // Handle to the LED toggle task so we can delete/recreate it at runtime
