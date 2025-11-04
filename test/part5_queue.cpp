@@ -27,7 +27,7 @@ void printQueueMessages(void *pvParameters)
             Serial.print("Received from queue: ");
             Serial.println(item);
         }
-        
+
         vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 }
