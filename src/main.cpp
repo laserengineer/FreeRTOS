@@ -1,97 +1,103 @@
 #include <Arduino.h>
+#include <string.h>
+#include <stdio.h>
 
-// Use only core 1 for demo purposes
+// ---- Configuration ----
 #if CONFIG_FREERTOS_UNICORE
 static const BaseType_t app_cpu = 0;
 #else
 static const BaseType_t app_cpu = 1;
 #endif
 
-// Settings
-static const size_t msg_queue_len = 5;
+#define LED_PIN LED_BUILTIN
+#define SERIAL_BUF_SIZE 64
+#define LED_QUEUE_LEN 1
 
-// Global queue handle
-static QueueHandle_t msg_queue = NULL;
+static QueueHandle_t led_delay_queue = NULL;
 
-//*****************************************************************************
-// Tasks
-
-void printQueueMessages(void *pvParameters)
+// ---- Serial Monitor Task ----
+void serialMonitorTask(void *pvParameters)
 {
-    int item;
+    char buf[SERIAL_BUF_SIZE];
+    size_t len = 0;
+
     while (1)
     {
-        // Block for up to 500ms for a message
-        if (xQueueReceive(msg_queue, &item, 10 / portTICK_PERIOD_MS) == pdTRUE)
+        // Read bytes one by one
+        while (Serial.available())
         {
-            Serial.print("Received from queue: ");
-            Serial.println(item);
+            char c = Serial.read();
+            if (c == '\n' || c == '\r')
+            {
+                buf[len] = '\0'; // Null-terminate
+                if (len > 0)
+                {
+                    Serial.print("Echo: ");
+                    Serial.println(buf);
+
+                    // Parse command using sscanf
+                    int value;
+                    if (sscanf(buf, "delay %d", &value) == 1 && value > 0)
+                    {
+                        xQueueOverwrite(led_delay_queue, &value);
+                        Serial.printf("LED delay interval set to %d ms\n", value);
+                    }
+                }
+                len = 0; // Reset buffer
+            }
+            else if (len < SERIAL_BUF_SIZE - 1)
+            {
+                buf[len++] = c;
+            }
         }
-        
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
 
-void sendQueueMessages(void *pvParameters)
+// ---- LED Blink Task ----
+void ledBlinkTask(void *pvParameters)
 {
-    int num = 12;
+    int blink_interval = 500; // Default 500 ms
+    pinMode(LED_PIN, OUTPUT);
+
     while (1)
     {
-        if (xQueueSend(msg_queue, &num, 0) == pdTRUE)
+        int new_interval;
+        if (xQueueReceive(led_delay_queue, &new_interval, 0) == pdTRUE)
         {
-            Serial.printf("Sent item %d to queue\n", num);
+            blink_interval = new_interval;
         }
-        else
-        {
-            Serial.printf("Queue is full, item dropped: %d\n", num);
-        }
-        vTaskDelay(200 / portTICK_PERIOD_MS);
-        num++;
+        digitalWrite(LED_PIN, HIGH);
+        vTaskDelay(blink_interval / portTICK_PERIOD_MS);
+        digitalWrite(LED_PIN, LOW);
+        vTaskDelay(blink_interval / portTICK_PERIOD_MS);
     }
 }
 
+// ---- Setup & Loop ----
 void setup()
 {
     Serial.begin(115200);
     while (!Serial)
     {
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(10);
     }
 
-    // Optional: Wait for serial monitor to connect
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-
-    // Create queue and check for success
-    msg_queue = xQueueCreate(msg_queue_len, sizeof(int));
-    if (msg_queue == NULL)
+    led_delay_queue = xQueueCreate(LED_QUEUE_LEN, sizeof(int));
+    if (!led_delay_queue)
     {
-        Serial.println("Error creating the queue!");
+        Serial.println("Failed to create LED delay queue!");
         while (1)
         {
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            vTaskDelay(1000);
         }
     }
 
-    xTaskCreatePinnedToCore(
-        sendQueueMessages,
-        "Send Queue Messages",
-        2048,
-        NULL,
-        1,
-        NULL,
-        app_cpu);
-
-    xTaskCreatePinnedToCore(
-        printQueueMessages,
-        "Print Queue Messages",
-        2048,
-        NULL,
-        1,
-        NULL,
-        app_cpu);
+    xTaskCreatePinnedToCore(serialMonitorTask, "SerialMonitor", 2048, NULL, 1, NULL, app_cpu);
+    xTaskCreatePinnedToCore(ledBlinkTask, "LEDBlink", 2048, NULL, 1, NULL, app_cpu);
 }
 
 void loop()
 {
-    // Nothing to do here, tasks handle everything!
+    // Not used
 }
