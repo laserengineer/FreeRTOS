@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <BoardConfig.h>
 
+#define led_pin LED_BUILTIN // Use the built-in LED pin
+
 // ---- Configuration ----
 #if CONFIG_FREERTOS_UNICORE
 static const BaseType_t app_cpu = 0;
@@ -10,151 +12,191 @@ static const BaseType_t app_cpu = 0;
 static const BaseType_t app_cpu = 1;
 #endif
 
-#define LED_PIN LED_BUILTIN        // Use the built-in LED pin
-#define SERIAL_BUF_SIZE 64         // Size of the serial input buffer
-#define LED_QUEUE_LEN 1            // Only one LED delay value needed at a time
-#define LED_BLINK_MSG_QUEUE_LEN 64 // Buffer size for blink messages
-#define BLINK_REPORT_INTERVAL 100  // How often to report blink count
+// Settings
+static const uint8_t buf_len = 255;     // Size of buffer for command input
+static const char command[] = "delay "; // Command prefix (note the space)
+static const int delay_queue_len = 5;   // Size of delay_queue
+static const int msg_queue_len = 5;     // Size of msg_queue
+static const uint8_t blink_max = 100;   // Number of blinks before sending a message
 
-// Queuue for inter-task communication
-
-static QueueHandle_t led_delay_queue = NULL; // Queue for passing new LED delay values
-static QueueHandle_t led_blink_queue = NULL; // Queue for passing blink count messages
-
-// ---- Serial Monitor Task ----
-// This task handles serial input and ouput, including echoing commands and printing blink reports
-void serialMonitorTask(void *pvParameters)
+// Message struct: used to wrap strings for inter-task communication
+typedef struct Message
 {
-    char buf[SERIAL_BUF_SIZE];               // Buffer for incoming serial data
-    size_t len = 0;                          // Current length of data in buffer
-    char msg_queue[LED_BLINK_MSG_QUEUE_LEN]; // Buffer for messages from LED blink task
+    char body[100]; // Message text
+    int count;      // Optional: count or other data
+} Message;
+
+// Globals: Queues for inter-task communication
+static QueueHandle_t delay_queue;
+static QueueHandle_t msg_queue;
+
+//*****************************************************************************
+// Task: Command Line Interface (CLI)
+// Reads user input from Serial, parses commands, and sends new delay values to the blink task
+
+void doCLI(void *parameters)
+{
+    Message rcv_msg;                   // Buffer for received messages from blink task
+    char c;                            // Latest character read from Serial
+    char buf[buf_len];                 // Input buffer for command line
+    uint8_t idx = 0;                   // Current position in input buffer
+    uint8_t cmd_len = strlen(command); // Length of the command prefix
+    int led_delay;                     // Parsed delay value
+
+    memset(buf, 0, buf_len); // Clear the input buffer
 
     while (1)
     {
-        // Read incoming serial data one character at a time
-        while (Serial.available())
+        // Check if there is a message in the queue from the blink task (non-blocking)
+        if (xQueueReceive(msg_queue, (void *)&rcv_msg, 0) == pdTRUE)
         {
-            char c = Serial.read();     // Read a character from serial buffer
-            if (c == '\n' || c == '\r') // If end of line detected
-            {
-                buf[len] = '\0'; // Null-terminate the string
-                if (len > 0)
-                {
-                    Serial.println(buf);
+            Serial.println(rcv_msg.body);
+            // Optionally print rcv_msg.count if needed
+        }
 
-                    // Parse command: look for "delay <value>" using sscanf
-                    int value;
-                    if (sscanf(buf, "delay %d", &value) == 1 && value > 0)
+        // Read character from serial port if available
+        while (Serial.available() > 0)
+        {
+            c = Serial.read();
+
+            // Handle Enter (CR, LF, or CRLF)
+            if (c == '\r' || c == '\n')
+            {
+                // If CR is followed by LF, skip the LF
+                if (c == '\r' && Serial.peek() == '\n')
+                {
+                    Serial.read(); // consume the '\n'
+                }
+
+                Serial.println(); // Move to new line after Enter
+
+                buf[idx] = '\0'; // Null-terminate the buffer
+
+                // Only process if something was entered
+                if (idx > 0)
+                {
+                    // Check if input starts with "delay "
+                    if (memcmp(buf, command, cmd_len) == 0)
                     {
-                        // Send new delay value to the LED blink task
-                        xQueueOverwrite(led_delay_queue, &value);
-                        Serial.printf("LED delay interval set to %d ms\n", value);
+                        char *tail = buf + cmd_len;
+                        led_delay = atoi(tail);
+                        led_delay = abs(led_delay);
+
+                        if (xQueueSend(delay_queue, (void *)&led_delay, 10) != pdTRUE)
+                        {
+                            Serial.println("ERROR: Could not put new delay settings on delay queue.");
+                        }
+                        else
+                        {
+                            Serial.print("New LED delay set to ");
+                            Serial.print(led_delay);
+                            Serial.println(" ms");
+                        }
+                    }
+                    else
+                    {
+                        Serial.println("ERROR: Unknown command.");
+                        // (Optional: print ASCII codes for debugging)
                     }
                 }
 
-                len = 0; // Reset buffer
+                // Reset buffer for next command
+                memset(buf, 0, buf_len);
+                idx = 0;
             }
-            else if (len < SERIAL_BUF_SIZE - 1)
+            else if (idx < buf_len - 1)
             {
-                buf[len++] = c; // Store character in buffer
-                Serial.print(c);
+                Serial.print(c); // Echo character
+                buf[idx++] = c;
             }
         }
-
-        // check if there is's a new blink message from the LED blink task
-        if (xQueueReceive(led_blink_queue, msg_queue, 10) == pdTRUE)
-        {
-            Serial.printf("%s", msg_queue); // Print the blink message
-        }
-        vTaskDelay(10 / portTICK_PERIOD_MS); // Short delay to yield CPU
     }
 }
 
-// ---- LED Blink Task ----
-// This task blinks the LED at intervals specified by the serial monitor task
+//*****************************************************************************
+// Task: Blink LED
+// Blinks the LED at the current delay interval, receives new delay values from CLI task
 
-void ledBlinkTask(void *pvParameters)
+void blinkLED(void *parameters)
 {
-    int blink_interval = 500; // Default 500 ms
-    pinMode(LED_PIN, OUTPUT);
-    int new_interval;
-    int led_blink_count = 0;
-    char msg_buf[LED_BLINK_MSG_QUEUE_LEN];
+    Message msg;         // Message to send to CLI task
+    int led_delay = 500; // Default blink delay in ms
+    uint8_t counter = 0; // Blink counter
+
+    pinMode(LED_BUILTIN, OUTPUT); // Set up LED pin
 
     while (1)
     {
-        // Check if a new delay interval has been received from the serial task
-
-        if (xQueueReceive(led_delay_queue, &new_interval, 10) == pdTRUE)
+        // Check for new delay value from CLI task (non-blocking)
+        if (xQueueReceive(delay_queue, (void *)&led_delay, 0) == pdTRUE)
         {
-            blink_interval = new_interval; // Update blink interval
-            led_blink_count = 0;           // Reset blink count
+            // Prepare and send a message to CLI task about the new delay
+            sprintf(msg.body, "MESSAGE: New delay setting received %d", led_delay);
+            msg.count = 1;
+            xQueueSend(msg_queue, (void *)&msg, 10);
         }
-        digitalWrite(LED_PIN, HIGH);
-        vTaskDelay(blink_interval / portTICK_PERIOD_MS);
-        digitalWrite(LED_PIN, LOW);
-        vTaskDelay(blink_interval / portTICK_PERIOD_MS);
-        led_blink_count++;
 
-        if (led_blink_count % BLINK_REPORT_INTERVAL == 0 && led_blink_count != 0)
+        // Blink the LED
+        digitalWrite(led_pin, HIGH);
+        vTaskDelay(led_delay / portTICK_PERIOD_MS);
+        digitalWrite(led_pin, LOW);
+        vTaskDelay(led_delay / portTICK_PERIOD_MS);
+        counter++;
+
+        // After blink_max blinks, send a message to CLI task
+        if (counter >= blink_max)
         {
-            // Print to serial for immediate feedback
-            Serial.printf("LED blink: %d times\n", led_blink_count);
-
-            // Format message and send to serial monitor task via queue
-            snprintf(
-                msg_buf, sizeof(msg_buf),
-                "LED has blinked %d times\n", led_blink_count);
-
-            // Try to send the message to the queue
-            if (xQueueSend(led_blink_queue, msg_buf, 0) != pdPASS)
-            {
-                Serial.println("Warning: LED blink queue full, message dropped.");
-            }
+            sprintf(msg.body, "LED blinked %d times", blink_max);
+            msg.count = counter;
+            xQueueSend(msg_queue, (void *)&msg, 10);
+            counter = 0; // Reset counter
         }
     }
 }
 
-// ---- Setup & Loop ----
+//*****************************************************************************
+// Arduino Setup: Initializes serial, queues, and tasks
+
 void setup()
 {
     Serial.begin(115200);
 
-    // Wait for serial port to be ready (with timeout to avoid infinite wait)
-    unsigned long start = millis();
-    while (!Serial && millis() - start < 5000)
-    {
-        vTaskDelay(10);
-    }
-    // Create queue for LED delay values (holds one int)
-    led_delay_queue = xQueueCreate(LED_QUEUE_LEN, sizeof(int));
-    if (!led_delay_queue)
-    {
-        Serial.println("Failed to create LED delay queue!");
-        while (1)
-        {
-            vTaskDelay(1000);
-        }
-    }
+    // Print instructions to user
+    Serial.println("---FreeRTOS Queue Solution---");
+    Serial.println("Enter the command 'delay xxx' where xxx is your desired ");
+    Serial.println("LED blink delay time in milliseconds");
 
-    // Create queue for blink messages (holds one message buffer)
-    led_blink_queue = xQueueCreate(LED_QUEUE_LEN, LED_BLINK_MSG_QUEUE_LEN);
-    if (!led_blink_queue)
-    {
-        Serial.println("Failed to create LED blink message queue!");
-        while (1)
-        {
-            vTaskDelay(1000);
-        }
-    }
+    // Create queues for inter-task communication
+    delay_queue = xQueueCreate(delay_queue_len, sizeof(int));
+    msg_queue = xQueueCreate(msg_queue_len, sizeof(Message));
 
-    // Start the serial monitor and LED blink tasks, pinned to the selected CPU core
+    // Start CLI task (handles user input)
+    xTaskCreatePinnedToCore(
+        doCLI,
+        "CLI Task",
+        4096,
+        NULL,
+        1,
+        NULL,
+        app_cpu);
 
-    xTaskCreatePinnedToCore(serialMonitorTask, "SerialMonitor", 2048, NULL, 1, NULL, app_cpu);
-    xTaskCreatePinnedToCore(ledBlinkTask, "LEDBlink", 2048, NULL, 1, NULL, app_cpu);
+    // Start LED blink task
+    xTaskCreatePinnedToCore(
+        blinkLED,
+        "LED Blink Task",
+        2048,
+        NULL,
+        1,
+        NULL,
+        app_cpu);
+
+    vTaskDelete(NULL); // Delete setup task (not needed after setup)
 }
+
+//*****************************************************************************
+// Arduino Loop: Not used, as everything is handled by FreeRTOS tasks
 
 void loop()
 {
-    // Not used
+    // Empty. All work is done in tasks.
 }
