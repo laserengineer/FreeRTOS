@@ -88,7 +88,7 @@ void doCLI(void *parameters)
                         }
                         else
                         {
-                            Serial.print("New LED delay set to ");
+                            Serial.print("MESSAGE: New LED delay set to ");
                             Serial.print(led_delay);
                             Serial.println(" ms");
                         }
@@ -146,7 +146,7 @@ void blinkLED(void *parameters)
         // After blink_max blinks, send a message to CLI task
         if (counter >= blink_max)
         {
-            sprintf(msg.body, "LED blinked %d times", blink_max);
+            sprintf(msg.body, "MESSAGE: LED blinked %d times", blink_max);
             msg.count = counter;
             xQueueSend(msg_queue, (void *)&msg, 10);
             counter = 0; // Reset counter
