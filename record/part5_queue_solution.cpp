@@ -79,6 +79,7 @@ void doCLI(void *parameters)
                     if (memcmp(buf, command, cmd_len) == 0)
                     {
                         char *tail = buf + cmd_len;
+                        Serial.println(tail); // Echo the delay value
                         led_delay = atoi(tail);
                         led_delay = abs(led_delay);
 
