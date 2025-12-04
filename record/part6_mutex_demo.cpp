@@ -34,7 +34,6 @@ void incTask(void *parameters)
 
             // Print the value of shared_var);
             Serial.println(shared_var);
-            taskYIELD();
         }
         else
         {

@@ -65,10 +65,9 @@ void doCLI(void *parameters)
                 // If CR is followed by LF, skip the LF
                 if (c == '\r' && Serial.peek() == '\n')
                 {
-                    Serial.read(); // consume the '\n'
+                    Serial.read();    // consume the '\n'
+                    Serial.println(); // Move to new line after Enter
                 }
-
-                Serial.println(); // Move to new line after Enter
 
                 buf[idx] = '\0'; // Null-terminate the buffer
 
