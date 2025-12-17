@@ -60,7 +60,7 @@ void setup()
     Serial.begin(115200);
 
     // Wait a moment to start (so we don't miss Serial output)
-    vTaskDelay(3000 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
 
     Serial.println();
     Serial.println("---FreeRTOS Mutex Challenge---");
