@@ -95,10 +95,10 @@ void setup()
             app_cpu);
     }
 
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
     Serial.println("All tasks created");
 }
 
 void loop()
 {
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
 }

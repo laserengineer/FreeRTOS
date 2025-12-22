@@ -1,11 +1,18 @@
-#include <Arduino.h>
-#include <string.h>
-#include <stdio.h>
-#include <BoardConfig.h>
+/**
+ * FreeRTOS Queue Alternate Solution
+ *
+ * Demonstrate how it's often easier to use queues instead of counting
+ * semaphores to pass information between tasks.
+ *
+ * Date: January 24, 2021
+ * Author: Shawn Hymel
+ * License: 0BSD
+ */
 
-#define led_pin LED_BUILTIN // Use the built-in LED pin
+// You'll likely need this on vanilla FreeRTOS
+// #include <semphr.h>
 
-// ---- Configuration ----
+// Use only core 1 for demo purposes
 #if CONFIG_FREERTOS_UNICORE
 static const BaseType_t app_cpu = 0;
 #else
@@ -13,190 +20,118 @@ static const BaseType_t app_cpu = 1;
 #endif
 
 // Settings
-static const uint8_t buf_len = 255;     // Size of buffer for command input
-static const char command[] = "delay "; // Command prefix (note the space)
-static const int delay_queue_len = 5;   // Size of delay_queue
-static const int msg_queue_len = 5;     // Size of msg_queue
-static const uint8_t blink_max = 100;   // Number of blinks before sending a message
+static const uint8_t queue_len = 10; // Size of queue
+static const int num_prod_tasks = 5; // Number of producer tasks
+static const int num_cons_tasks = 2; // Number of consumer tasks
+static const int num_writes = 3;     // Num times each producer writes to buf
 
-// Message struct: used to wrap strings for inter-task communication
-typedef struct Message
-{
-    char body[100]; // Message text
-    int count;      // Optional: count or other data
-} Message;
-
-// Globals: Queues for inter-task communication
-static QueueHandle_t delay_queue;
-static QueueHandle_t msg_queue;
+// Globals
+static SemaphoreHandle_t bin_sem; // Waits for parameter to be read
+static SemaphoreHandle_t mutex;   // Lock access to Serial resource
+static QueueHandle_t msg_queue;   // Send data from producer to consumer
 
 //*****************************************************************************
-// Task: Command Line Interface (CLI)
-// Reads user input from Serial, parses commands, and sends new delay values to the blink task
+// Tasks
 
-void doCLI(void *parameters)
+// Producer: write a given number of times to shared buffer
+void producer(void *parameters)
 {
-    Message rcv_msg;                   // Buffer for received messages from blink task
-    char c;                            // Latest character read from Serial
-    char buf[buf_len];                 // Input buffer for command line
-    uint8_t idx = 0;                   // Current position in input buffer
-    uint8_t cmd_len = strlen(command); // Length of the command prefix
-    int led_delay;                     // Parsed delay value
 
-    memset(buf, 0, buf_len); // Clear the input buffer
+    // Copy the parameters into a local variable
+    int num = *(int *)parameters;
 
+    // Release the binary semaphore
+    xSemaphoreGive(bin_sem);
+
+    // Fill queue with task number (wait max time if queue is full)
+    for (int i = 0; i < num_writes; i++)
+    {
+        xQueueSend(msg_queue, (void *)&num, portMAX_DELAY);
+    }
+
+    // Delete self task
+    vTaskDelete(NULL);
+}
+
+// Consumer: continuously read from shared buffer
+void consumer(void *parameters)
+{
+
+    int val;
+
+    // Read from buffer
     while (1)
     {
-        // Check if there is a message in the queue from the blink task (non-blocking)
-        if (xQueueReceive(msg_queue, (void *)&rcv_msg, 0) == pdTRUE)
-        {
-            Serial.println(rcv_msg.body);
-            // Optionally print rcv_msg.count if needed
-        }
 
-        // Read character from serial port if available
-        while (Serial.available() > 0)
-        {
-            c = Serial.read();
+        // Read from queue (wait max time if queue is empty)
+        xQueueReceive(msg_queue, (void *)&val, portMAX_DELAY);
 
-            // Handle Enter (CR, LF, or CRLF)
-            if (c == '\r' || c == '\n')
-            {
-                // If CR is followed by LF, skip the LF
-                if (c == '\r' && Serial.peek() == '\n')
-                {
-                    Serial.read();    // consume the '\n'
-                    Serial.println(); // Move to new line after Enter
-                }
-
-                buf[idx] = '\0'; // Null-terminate the buffer
-
-                // Only process if something was entered
-                if (idx > 0)
-                {
-                    // Check if input starts with "delay "
-                    if (memcmp(buf, command, cmd_len) == 0)
-                    {
-                        char *tail = buf + cmd_len;
-                        Serial.println(tail); // Echo the delay value
-                        led_delay = atoi(tail);
-                        led_delay = abs(led_delay);
-
-                        if (xQueueSend(delay_queue, (void *)&led_delay, 10) != pdTRUE)
-                        {
-                            Serial.println("ERROR: Could not put new delay settings on delay queue.");
-                        }
-                        else
-                        {
-                            Serial.print("MESSAGE: New LED delay set to ");
-                            Serial.print(led_delay);
-                            Serial.println(" ms");
-                        }
-                    }
-                    else
-                    {
-                        Serial.println("ERROR: Unknown command.");
-                        // (Optional: print ASCII codes for debugging)
-                    }
-                }
-
-                // Reset buffer for next command
-                memset(buf, 0, buf_len);
-                idx = 0;
-            }
-            else if (idx < buf_len - 1)
-            {
-                Serial.print(c); // Echo character
-                buf[idx++] = c;
-            }
-        }
+        // Lock Serial resource with a mutex
+        xSemaphoreTake(mutex, portMAX_DELAY);
+        Serial.println(val);
+        xSemaphoreGive(mutex);
     }
 }
 
 //*****************************************************************************
-// Task: Blink LED
-// Blinks the LED at the current delay interval, receives new delay values from CLI task
-
-void blinkLED(void *parameters)
-{
-    Message msg;         // Message to send to CLI task
-    int led_delay = 500; // Default blink delay in ms
-    uint8_t counter = 0; // Blink counter
-
-    pinMode(LED_BUILTIN, OUTPUT); // Set up LED pin
-
-    while (1)
-    {
-        // Check for new delay value from CLI task (non-blocking)
-        if (xQueueReceive(delay_queue, (void *)&led_delay, 0) == pdTRUE)
-        {
-            // Prepare and send a message to CLI task about the new delay
-            sprintf(msg.body, "MESSAGE: New delay setting received %d", led_delay);
-            msg.count = 1;
-            xQueueSend(msg_queue, (void *)&msg, 10);
-        }
-
-        // Blink the LED
-        digitalWrite(led_pin, HIGH);
-        vTaskDelay(led_delay / portTICK_PERIOD_MS);
-        digitalWrite(led_pin, LOW);
-        vTaskDelay(led_delay / portTICK_PERIOD_MS);
-        counter++;
-
-        // After blink_max blinks, send a message to CLI task
-        if (counter >= blink_max)
-        {
-            sprintf(msg.body, "MESSAGE: LED blinked %d times", blink_max);
-            msg.count = counter;
-            xQueueSend(msg_queue, (void *)&msg, 10);
-            counter = 0; // Reset counter
-        }
-    }
-}
-
-//*****************************************************************************
-// Arduino Setup: Initializes serial, queues, and tasks
+// Main (runs as its own task with priority 1 on core 1)
 
 void setup()
 {
+
+    char task_name[12];
+
+    // Configure Serial
     Serial.begin(115200);
 
-    // Print instructions to user
-    Serial.println("---FreeRTOS Queue Solution---");
-    Serial.println("Enter the command 'delay xxx' where xxx is your desired ");
-    Serial.println("LED blink delay time in milliseconds");
+    // Wait a moment to start (so we don't miss Serial output)
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    Serial.println();
+    Serial.println("---FreeRTOS Semaphore Solution---");
 
-    // Create queues for inter-task communication
-    delay_queue = xQueueCreate(delay_queue_len, sizeof(int));
-    msg_queue = xQueueCreate(msg_queue_len, sizeof(Message));
+    // Create mutexes and semaphores before starting tasks
+    bin_sem = xSemaphoreCreateBinary();
+    mutex = xSemaphoreCreateMutex();
 
-    // Start CLI task (handles user input)
-    xTaskCreatePinnedToCore(
-        doCLI,
-        "CLI Task",
-        4096,
-        NULL,
-        1,
-        NULL,
-        app_cpu);
+    // Create queue
+    msg_queue = xQueueCreate(queue_len, sizeof(int));
 
-    // Start LED blink task
-    xTaskCreatePinnedToCore(
-        blinkLED,
-        "LED Blink Task",
-        2048,
-        NULL,
-        1,
-        NULL,
-        app_cpu);
+    // Start producer tasks (wait for each to read argument)
+    for (int i = 0; i < num_prod_tasks; i++)
+    {
+        sprintf(task_name, "Producer %i", i);
+        xTaskCreatePinnedToCore(producer,
+                                task_name,
+                                1024,
+                                (void *)&i,
+                                1,
+                                NULL,
+                                app_cpu);
+        xSemaphoreTake(bin_sem, portMAX_DELAY);
+    }
 
-    vTaskDelete(NULL); // Delete setup task (not needed after setup)
+    // Start consumer tasks
+    for (int i = 0; i < num_cons_tasks; i++)
+    {
+        sprintf(task_name, "Consumer %i", i);
+        xTaskCreatePinnedToCore(consumer,
+                                task_name,
+                                1024,
+                                NULL,
+                                1,
+                                NULL,
+                                app_cpu);
+    }
+
+    // Notify that all tasks have been created (lock Serial with mutex)
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    Serial.println("All tasks created");
+    xSemaphoreGive(mutex);
 }
-
-//*****************************************************************************
-// Arduino Loop: Not used, as everything is handled by FreeRTOS tasks
 
 void loop()
 {
-    // Empty. All work is done in tasks.
+
+    // Do nothing but allow yielding to lower-priority tasks
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
 }
