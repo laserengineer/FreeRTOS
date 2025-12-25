@@ -11,24 +11,75 @@ static const BaseType_t app_cpu = 1;
 #define LED_PIN LED_BUILTIN // Use the built-in LED pin
 
 // Settings
-static const TickType_t dim_delay = 5000 / portTICK_PERIOD_MS; // Time before dimming LED
+static const TickType_t dim_delay = 5000 / portTICK_PERIOD_MS;              // Time before dimming LED
+static const TickType_t blink_interval = 500 / portTICK_PERIOD_MS;          // LED blink interval
+static const TickType_t remain_display_interval = 100 / portTICK_PERIOD_MS; // How often to print remaining time
 
 // Globals
 static TimerHandle_t led_timer = NULL;
+static TaskHandle_t led_blink_task_handle = NULL;
+static TaskHandle_t remain_time_task_handle = NULL;
+static TickType_t timer_end_tick = 0;
 
 //*****************************************************************************
 // Callbacks
 
-// Turn off LED when timer expires
+// Turn off LED when timer expires and stop blinking task
 void ledTimerCallback(TimerHandle_t xTimer)
 {
+    // Stop the blinking task
+    if (led_blink_task_handle != NULL)
+    {
+        vTaskDelete(led_blink_task_handle);
+        led_blink_task_handle = NULL;
+    }
+
+    // Stop the remaining time display task
+    if (remain_time_task_handle != NULL)
+    {
+        vTaskDelete(remain_time_task_handle);
+        remain_time_task_handle = NULL;
+    }
+
     digitalWrite(LED_PIN, LOW);
     Serial.println("");
-    Serial.println("LED dimmed OFF after delay");
+    Serial.println("LED dimmed OFF after 5 second delay");
 }
 
 //*****************************************************************************
 // Tasks
+
+void ledBlinkTask(void *parameters)
+{
+    pinMode(LED_PIN, OUTPUT);
+    bool ledstate = false;
+    while (1)
+    {
+        ledstate = !ledstate;
+        digitalWrite(LED_PIN, ledstate ? HIGH : LOW);
+        vTaskDelay(blink_interval);
+    }
+}
+
+void remainTimeTask(void *parameters)
+{
+    while (1)
+    {
+        TickType_t now = xTaskGetTickCount();
+        TickType_t remain = (timer_end_tick > now) ? (timer_end_tick - now) : 0;
+        Serial.print("Timer remaining: ");
+        Serial.print(remain * portTICK_PERIOD_MS);
+        Serial.println(" ms");
+        if (remain == 0)
+        {
+            // Timer expired, exit task
+            break;
+        }
+        vTaskDelay(remain_display_interval);
+    }
+    remain_time_task_handle = NULL;
+    vTaskDelete(NULL);
+}
 
 void doCLI(void *parameters)
 {
@@ -44,8 +95,36 @@ void doCLI(void *parameters)
             c = Serial.read();
             Serial.print(c);
 
-            // Turn ON the LED
-            digitalWrite(LED_PIN, HIGH);
+            // Start or restart the blink task
+            if (led_blink_task_handle == NULL)
+            {
+                xTaskCreatePinnedToCore(
+                    ledBlinkTask,           // Task function
+                    "LED Blink",            // Name of task
+                    2048,                   // Stack size in words
+                    NULL,                   // Task input parameter
+                    1,                      // Priority of the task
+                    &led_blink_task_handle, // Task handle
+                    app_cpu);               // Core where the task should run
+            }
+
+            // Calculate and store timer end tick
+            timer_end_tick = xTaskGetTickCount() + dim_delay;
+
+            // Start or restart the remaining time display task
+            if (remain_time_task_handle != NULL)
+            {
+                vTaskDelete(remain_time_task_handle);
+                remain_time_task_handle = NULL;
+            }
+            xTaskCreatePinnedToCore(
+                remainTimeTask,
+                "Remain Time Task",
+                1024,
+                NULL,
+                2,
+                &remain_time_task_handle,
+                app_cpu);
 
             // Start Timer (if timer is already running, reset it )
             xTimerStart(led_timer, portMAX_DELAY);
