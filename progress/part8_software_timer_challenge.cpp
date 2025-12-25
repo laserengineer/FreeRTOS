@@ -11,9 +11,9 @@ static const BaseType_t app_cpu = 1;
 #define LED_PIN LED_BUILTIN // Use the built-in LED pin
 
 // Settings
-static const TickType_t dim_delay = 5000 / portTICK_PERIOD_MS;              // Time before dimming LED
-static const TickType_t blink_interval = 500 / portTICK_PERIOD_MS;          // LED blink interval
-static const TickType_t remain_display_interval = 100 / portTICK_PERIOD_MS; // How often to print remaining time
+static const TickType_t dim_delay = 5000 / portTICK_PERIOD_MS;               // Time before dimming LED
+static const TickType_t blink_interval = 200 / portTICK_PERIOD_MS;           // LED blink interval
+static const TickType_t remain_display_interval = 1000 / portTICK_PERIOD_MS; // How often to print remaining time
 
 // Globals
 static TimerHandle_t led_timer = NULL;
@@ -42,7 +42,6 @@ void ledTimerCallback(TimerHandle_t xTimer)
     }
 
     digitalWrite(LED_PIN, LOW);
-    Serial.println("");
     Serial.println("LED dimmed OFF after 5 second delay");
 }
 
@@ -94,6 +93,11 @@ void doCLI(void *parameters)
             // Echo everthing back to the serial port
             c = Serial.read();
             Serial.print(c);
+            // Start Timer (if timer is already running, reset it )
+            xTimerStart(led_timer, portMAX_DELAY);
+            // Calculate and store timer end tick
+            // timer_end_tick = xTaskGetTickCount() + dim_delay;
+            timer_end_tick = xTimerGetExpiryTime(led_timer);
 
             // Start or restart the blink task
             if (led_blink_task_handle == NULL)
@@ -107,9 +111,6 @@ void doCLI(void *parameters)
                     &led_blink_task_handle, // Task handle
                     app_cpu);               // Core where the task should run
             }
-
-            // Calculate and store timer end tick
-            timer_end_tick = xTaskGetTickCount() + dim_delay;
 
             // Start or restart the remaining time display task
             if (remain_time_task_handle != NULL)
@@ -125,9 +126,6 @@ void doCLI(void *parameters)
                 2,
                 &remain_time_task_handle,
                 app_cpu);
-
-            // Start Timer (if timer is already running, reset it )
-            xTimerStart(led_timer, portMAX_DELAY);
         }
         vTaskDelay(10 / portTICK_PERIOD_MS); // Yield to other tasks
     }
