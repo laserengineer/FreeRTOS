@@ -12,6 +12,8 @@ static const BaseType_t app_cpu = 0;
 static const BaseType_t app_cpu = 1;
 #endif
 
+#define LED_PIN LED_BUILTIN // Use the built-in LED pin
+
 // Globals
 static hw_timer_t *timer = NULL;
 bool ledstate = false;

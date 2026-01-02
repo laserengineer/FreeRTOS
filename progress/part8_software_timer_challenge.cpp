@@ -1,5 +1,6 @@
 #include <Arduino.h>
-#include <BoardConfig.h>
+
+// #include <BoardConfig.h>
 
 // Use only core 1 for demo purposes
 #if CONFIG_FREERTOS_UNICORE
@@ -11,15 +12,16 @@ static const BaseType_t app_cpu = 1;
 #define LED_PIN LED_BUILTIN // Use the built-in LED pin
 
 // Settings
-static const TickType_t dim_delay = 5000 / portTICK_PERIOD_MS;               // Time before dimming LED
-static const TickType_t blink_interval = 200 / portTICK_PERIOD_MS;           // LED blink interval
-static const TickType_t remain_display_interval = 1000 / portTICK_PERIOD_MS; // How often to print remaining time
+static const TickType_t dim_delay = 5000 / portTICK_PERIOD_MS;              // Time before dimming LED
+static const TickType_t blink_interval = 200 / portTICK_PERIOD_MS;          // LED blink interval
+static const TickType_t remain_display_interval = 500 / portTICK_PERIOD_MS; // How often to print remaining time
 
 // Globals
 static TimerHandle_t led_timer = NULL;
 static TaskHandle_t led_blink_task_handle = NULL;
 static TaskHandle_t remain_time_task_handle = NULL;
 static TickType_t timer_end_tick = 0;
+static int remain_time = 0; // Example shared variable
 
 //*****************************************************************************
 // Callbacks
@@ -41,7 +43,8 @@ void ledTimerCallback(TimerHandle_t xTimer)
         remain_time_task_handle = NULL;
     }
 
-    digitalWrite(LED_PIN, LOW);
+    // digitalWrite(LED_PIN, LOW);
+    rgbLedWrite(RGB_BUILTIN, 0, 0, 0); // White before turning off
     Serial.println("LED dimmed OFF after 5 second delay");
 }
 
@@ -52,10 +55,14 @@ void ledBlinkTask(void *parameters)
 {
     pinMode(LED_PIN, OUTPUT);
     bool ledstate = false;
+    int led_brightness;
     while (1)
     {
         ledstate = !ledstate;
-        digitalWrite(LED_PIN, ledstate ? HIGH : LOW);
+        led_brightness = int(255 * remain_time / dim_delay);
+        Serial.println(led_brightness);
+        rgbLedWrite(RGB_BUILTIN, ledstate ? 0 : led_brightness, ledstate ? 0 : 0, ledstate ? led_brightness : 0);
+        // digitalWrite(LED_PIN, ledstate ? HIGH : LOW);
         vTaskDelay(blink_interval);
     }
 }
@@ -66,7 +73,7 @@ void remainTimeTask(void *parameters)
     {
         TickType_t now = xTaskGetTickCount();
         TickType_t remain = (timer_end_tick > now) ? (timer_end_tick - now) : 0;
-        Serial.print("Timer remaining: ");
+        remain_time = remain;
         Serial.print(remain * portTICK_PERIOD_MS);
         Serial.println(" ms");
         if (remain == 0)
@@ -92,12 +99,12 @@ void doCLI(void *parameters)
         {
             // Echo everthing back to the serial port
             c = Serial.read();
-            Serial.print(c);
+            // Serial.print(c);
             // Start Timer (if timer is already running, reset it )
             xTimerStart(led_timer, portMAX_DELAY);
             // Calculate and store timer end tick
-            // timer_end_tick = xTaskGetTickCount() + dim_delay;
-            timer_end_tick = xTimerGetExpiryTime(led_timer);
+            timer_end_tick = xTaskGetTickCount() + dim_delay;
+            // timer_end_tick = xTimerGetExpiryTime(led_timer);
 
             // Start or restart the blink task
             if (led_blink_task_handle == NULL)
