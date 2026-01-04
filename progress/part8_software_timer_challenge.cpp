@@ -1,6 +1,6 @@
 #include <Arduino.h>
 
-// #include <BoardConfig.h>
+#include <BoardConfig.h>
 
 // Use only core 1 for demo purposes
 #if CONFIG_FREERTOS_UNICORE
@@ -13,7 +13,7 @@ static const BaseType_t app_cpu = 1;
 
 // Settings
 static const TickType_t dim_delay = 5000 / portTICK_PERIOD_MS;              // Time before dimming LED
-static const TickType_t blink_interval = 200 / portTICK_PERIOD_MS;          // LED blink interval
+static const TickType_t blink_interval = 1000 / portTICK_PERIOD_MS;         // LED blink interval
 static const TickType_t remain_display_interval = 500 / portTICK_PERIOD_MS; // How often to print remaining time
 
 // Globals
@@ -44,7 +44,8 @@ void ledTimerCallback(TimerHandle_t xTimer)
     }
 
     // digitalWrite(LED_PIN, LOW);
-    rgbLedWrite(RGB_BUILTIN, 0, 0, 0); // White before turning off
+    // rgbLedWrite(RGB_BUILTIN, 0, 0, 0); // White before turning off
+    digitalWrite(LED_PIN, LOW);
     Serial.println("LED dimmed OFF after 5 second delay");
 }
 
@@ -59,10 +60,10 @@ void ledBlinkTask(void *parameters)
     while (1)
     {
         ledstate = !ledstate;
-        led_brightness = int(255 * remain_time / dim_delay);
-        Serial.println(led_brightness);
-        rgbLedWrite(RGB_BUILTIN, ledstate ? 0 : led_brightness, ledstate ? 0 : 0, ledstate ? led_brightness : 0);
-        // digitalWrite(LED_PIN, ledstate ? HIGH : LOW);
+        // led_brightness = int(255 * remain_time / dim_delay);
+        // Serial.println(led_brightness);
+        // rgbLedWrite(RGB_BUILTIN, ledstate ? 0 : led_brightness, ledstate ? 0 : 0, ledstate ? led_brightness : 0);
+        digitalWrite(LED_PIN, ledstate ? HIGH : LOW);
         vTaskDelay(blink_interval);
     }
 }

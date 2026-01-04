@@ -1,9 +1,11 @@
+// ISR Interrupts Service Routine (ISR) example using ESP32 hardware timer
+
 #include <Arduino.h>
-// #include <BoardConfig.h>
+#include <BoardConfig.h>
 
 // Settings
 static const uint16_t timer_divider = 80;
-static const uint64_t timer_max_count = 1000000;
+static const uint64_t timer_max_count = 2000000;
 
 // Use only core 1 for demo purposes
 #if CONFIG_FREERTOS_UNICORE
@@ -12,11 +14,10 @@ static const BaseType_t app_cpu = 0;
 static const BaseType_t app_cpu = 1;
 #endif
 
-#define LED_PIN LED_BUILTIN // Use the built-in LED pin
-
 // Globals
 static hw_timer_t *timer = NULL;
-bool ledstate = false;
+volatile bool ledstate = false;
+// #define LED_PIN LED_BUILTIN // Use the built-in LED pin
 
 //*****************************************************************************
 // Interrupt Service Routines (ISRs)
@@ -24,7 +25,8 @@ bool ledstate = false;
 void IRAM_ATTR onTimer()
 {
     ledstate = !ledstate;
-    rgbLedWrite(RGB_BUILTIN, ledstate ? RGB_BRIGHTNESS : 0, ledstate ? RGB_BRIGHTNESS : 0, ledstate ? RGB_BRIGHTNESS : 0);
+    digitalWrite(LED_BUILTIN, ledstate ? HIGH : LOW);
+    Serial.println(ledstate);
 }
 
 //*****************************************************************************
@@ -41,15 +43,17 @@ void setup()
     Serial.println("CPU");                // In MHz
     Serial.println(getCpuFrequencyMhz()); // In MHz
 
+    pinMode(LED_BUILTIN, OUTPUT);
+
     // Create and start timer (num, divider, countUp)
-    timer = timerBegin(0, timer_divider, true);
+    timer = timerBegin(1000000);
     // Provide ISR to timer (timer, function, edge)
-    timerAttachInterrupt(timer, &onTimer, true);
+    timerAttachInterrupt(timer, &onTimer);
     // At what count should ISR trigger (timer, count, autoreload)
-    timerAlarmWrite(timer, timer_max_count, true);
+    // timerWrite(timer, timer_max_count);
 
     // Allow ISR to trigger
-    timerAlarmEnable(timer);
+    timerAlarm(timer, timer_max_count, true, 0);
 }
 void loop()
 {
