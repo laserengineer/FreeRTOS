@@ -16,7 +16,7 @@ static const BaseType_t app_cpu = 1;
 
 // Settings
 static const uint32_t timer_frequency_hz = 10000000;            // 1 MHz timer tick (1 us per tick)
-static const uint32_t timer_max_count = 2500000;                // 500,000 us = 500 ms
+static const uint32_t timer_max_count = 1000000;                // 1,000,000 us = 1 second
 static const TickType_t task_delay = 2000 / portTICK_PERIOD_MS; // 2 second delay
 
 // Globals
@@ -85,8 +85,12 @@ void setup()
 
     // Attach onTimer function to hardware timer
     timerAttachInterrupt(timer, &onTimer);
-    // timerWrite(timer, 0);
+
+    // Enable Timer to work in autoreload mode
     timerAlarm(timer, timer_max_count, true, 0);
+
+    // Delete "Setup and loop" task
+    vTaskDelete(NULL);
 }
 
 void loop()
