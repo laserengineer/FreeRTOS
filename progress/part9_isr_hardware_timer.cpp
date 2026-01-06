@@ -1,4 +1,4 @@
-// ISR Interrupt Service Routine (ISR) example using ESP32 hardware timer (Arduino-ESP32 3.x style)
+// ISR Interrupt Service Routine (ISR) semaphore  with Arduino-ESP32 3.x style)
 
 #include <Arduino.h>
 #include <BoardConfig.h>
