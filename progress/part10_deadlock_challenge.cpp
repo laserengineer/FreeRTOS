@@ -12,7 +12,6 @@
 
 #include <Arduino.h>
 // Use only core 1 for demo purposes
-// Use only core 1 for demo purposes
 #if CONFIG_FREERTOS_UNICORE
 static const BaseType_t app_cpu = 0;
 #else
@@ -43,35 +42,21 @@ void eat(void *parameters)
 
     int num;
     char buf[50];
-    int idx_1;
-    int idx_2;
 
     // Copy parameter and increment semaphore count
     num = *(int *)parameters;
     xSemaphoreGive(bin_sem);
 
-    // Assign priority: pick up lower-numbered chopstick first
-    if (num < (num + 1) % NUM_TASKS)
-    {
-        idx_1 = num;
-        idx_2 = (num + 1) % NUM_TASKS;
-    }
-    else
-    {
-        idx_1 = (num + 1) % NUM_TASKS;
-        idx_2 = num;
-    }
-
-    // Take lower-numbered chopstick
-    xSemaphoreTake(chopstick[idx_1], portMAX_DELAY);
+    // Take left chopstick
+    xSemaphoreTake(chopstick[num], portMAX_DELAY);
     sprintf(buf, "Philosopher %i took chopstick %i", num, num);
     Serial.println(buf);
 
     // Add some delay to force deadlock
     vTaskDelay(1 / portTICK_PERIOD_MS);
 
-    // Take higher-numbered chopstick
-    xSemaphoreTake(chopstick[idx_2], portMAX_DELAY);
+    // Take right chopstick
+    xSemaphoreTake(chopstick[(num + 1) % NUM_TASKS], portMAX_DELAY);
     sprintf(buf, "Philosopher %i took chopstick %i", num, (num + 1) % NUM_TASKS);
     Serial.println(buf);
 
@@ -80,13 +65,13 @@ void eat(void *parameters)
     Serial.println(buf);
     vTaskDelay(10 / portTICK_PERIOD_MS);
 
-    // Put down higher-numbered chopstick
-    xSemaphoreGive(chopstick[idx_2]);
+    // Put down right chopstick
+    xSemaphoreGive(chopstick[(num + 1) % NUM_TASKS]);
     sprintf(buf, "Philosopher %i returned chopstick %i", num, (num + 1) % NUM_TASKS);
     Serial.println(buf);
 
-    // Put down lower-numbered chopstick
-    xSemaphoreGive(chopstick[idx_1]);
+    // Put down left chopstick
+    xSemaphoreGive(chopstick[num]);
     sprintf(buf, "Philosopher %i returned chopstick %i", num, num);
     Serial.println(buf);
 
@@ -109,7 +94,7 @@ void setup()
     // Wait a moment to start (so we don't miss Serial output)
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     Serial.println();
-    Serial.println("---FreeRTOS Dining Philosophers Hierarchy Solution---");
+    Serial.println("---FreeRTOS Dining Philosophers Challenge---");
 
     // Create kernel objects before starting tasks
     bin_sem = xSemaphoreCreateBinary();

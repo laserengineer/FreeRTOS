@@ -10,8 +10,8 @@ static const BaseType_t app_cpu = 1;
 // --------------------------------------------------------------------------
 // Settings
 // --------------------------------------------------------------------------
-static const uint32_t timer_frequency_hz = 1000000; // 1 MHz timer tick (1 us per tick)
-static const uint32_t timer_max_count = 100000;     // 100,000 us = 100 ms = 10 Hz Sample Rate
+static const uint32_t timer_frequency_hz = 10000000; // 1 MHz timer tick (1 us per tick)
+static const uint32_t timer_max_count = 1000000;     // 100,000 us = 100 ms = 10 Hz Sample Rate
 
 // ADC Settings
 static const int adc_pin = A0; // Adjust pin as necessary for your board
@@ -173,6 +173,7 @@ void serialEchoTask(void *pvParameters)
                     // Check for "avg" command
                     if (strcmp(cmd_buf, "avg") == 0)
                     {
+                        Serial.println();
                         Serial.println("Manual trigger: Calculating average...");
                         xSemaphoreGive(avg_sem);
                     }
